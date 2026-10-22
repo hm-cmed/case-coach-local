@@ -358,7 +358,7 @@
           <li><strong>この画面からの接続を許可する。</strong> Ollama は最初、ブラウザで開いたサイトからの接続を断る設定になっています。PowerShell に次を貼り付けて Enter を押します（何も表示されなければ成功です）。
             <div class="cmd"><code data-origin-cmd="win"></code><button type="button" class="copy">コピー</button></div>
             <p class="hint"><strong>このあと Ollama の再起動が必須です。</strong>タスクバー右下（「^」の中）の Ollama アイコンを右クリック →「Quit Ollama」で終了し、<strong>スタートメニューから</strong> Ollama を起動し直してください。開いたままの PowerShell から起動すると設定が反映されないことがあります。</p>
-            <p class="hint">確かめ方：PowerShell で次を実行し、<code>200</code> と出れば許可済み、<code>403</code> なら未設定か再起動前です。</p>
+            <p class="hint">確かめ方：PowerShell で次を実行し、結果の1行目が <code>HTTP/1.1 200 OK</code> なら許可済み、<code>HTTP/1.1 403 Forbidden</code> なら未設定か再起動前です（行頭が「&gt;&gt;」のまま止まったら Ctrl + C で取り消してください）。</p>
             <div class="cmd"><code data-origin-cmd="wincheck"></code><button type="button" class="copy">コピー</button></div>
             <p class="hint">ほかの用途で OLLAMA_ORIGINS をすでに設定している場合は、上書きせずカンマ区切りで追記します。</p>
           </li>

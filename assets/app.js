@@ -937,7 +937,7 @@ function originsCommand() {
 }
 
 function originsCheckCommand(base) {
-  return `curl.exe -s -o NUL -w "%{http_code}" -H "Origin: ${location.origin}" ${base}/api/tags`;
+  return `curl.exe -i -H "Origin: ${location.origin}" ${base}/api/tags`;
 }
 
 function fixNotAllowed(base) {
@@ -965,8 +965,11 @@ function fixNotAllowed(base) {
   if (OS === 'win') {
     parts.push(el('details', { class: 'diag-more' },
       el('summary', { text: 'それでも直らないとき' }),
-      el('p', { text: '設定が Ollama に届いているかは、PowerShell で次を実行して確かめられます。200 なら許可済み、403 なら未設定か Ollama の再起動前です。' }),
+      el('p', { text: 'まず、設定が保存されているかを確かめます。PowerShell で次を実行し、このサイトのアドレスが表示されればOKです（何も表示されなければ、手順1をもう一度）。' }),
+      cmdBox('[Environment]::GetEnvironmentVariable("OLLAMA_ORIGINS", "User")'),
+      el('p', { text: '次に、Ollama が設定を読み込んでいるかを確かめます。結果の1行目が「HTTP/1.1 200 OK」なら許可済み、「HTTP/1.1 403 Forbidden」なら Ollama の再起動がまだです。' }),
       cmdBox(originsCheckCommand(base)),
+      el('p', { text: 'PowerShell の行頭が「>>」のまま止まったら、Ctrl + C で取り消して、コピーし直してください。' }),
       el('p', { text: '403 のままなら、Ollama が完全に終わっていない可能性があります。PCを再起動してから、もう一度確かめてください。' }),
     ));
   }
@@ -1228,7 +1231,7 @@ function wireHelp() {
   const origin = location.origin;
   $('[data-origin-cmd=win]', d).textContent = `[Environment]::SetEnvironmentVariable("OLLAMA_ORIGINS", "${origin}", "User")`;
   $('[data-origin-cmd=mac]', d).textContent = `launchctl setenv OLLAMA_ORIGINS "${origin}"`;
-  $('[data-origin-cmd=wincheck]', d).textContent = `curl.exe -s -o NUL -w "%{http_code}" -H "Origin: ${origin}" http://localhost:11434/api/tags`;
+  $('[data-origin-cmd=wincheck]', d).textContent = `curl.exe -i -H "Origin: ${origin}" http://localhost:11434/api/tags`;
   for (const b of $$('.copy', d)) b.addEventListener('click', () => copyText($('code', b.parentElement).textContent, b));
 }
 
