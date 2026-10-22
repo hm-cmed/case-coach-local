@@ -970,6 +970,7 @@ function fixNotAllowed(base) {
       el('p', { text: '次に、Ollama が設定を読み込んでいるかを確かめます。結果の1行目が「HTTP/1.1 200 OK」なら許可済み、「HTTP/1.1 403 Forbidden」なら Ollama の再起動がまだです。' }),
       cmdBox(originsCheckCommand(base)),
       el('p', { text: 'PowerShell の行頭が「>>」のまま止まったら、Ctrl + C で取り消して、コピーし直してください。' }),
+      el('p', {}, el('strong', { text: '200 OK なのにここが ✕ のとき：' }), 'Ollama 側の設定は済んでいて、ブラウザ側で止まっています。Chrome をいったん完全に閉じて開き直し、それでもだめなら、シークレットウィンドウ（Ctrl + Shift + N）でこのページを開いて試してください。シークレットで動く場合は、拡張機能（特に Ollama と連携する拡張機能）が通信を書き換えています。その拡張機能をオフにしてください。'),
       el('p', { text: '403 のままなら、Ollama が完全に終わっていない可能性があります。PCを再起動してから、もう一度確かめてください。' }),
     ));
   }
