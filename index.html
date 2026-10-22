@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  通信制限（CSP）：このページが通信できるのは、このサイト自身（画面部品の読み込み）と、
+  このPC内のAIサーバー（localhost / 127.0.0.1）だけです。入力した文章やファイルを
+  外部に送るコードを誤って書いても、ブラウザがブロックします。
+  研究室・病院内のAIサーバーにつなぐ場合は connect-src にそのアドレスを追加してください（README参照）。
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:*; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>ケース・コーチ ローカル版</title>
+<meta name="description" content="症例報告・スライドの壁打ちと、事例振り返りの支援を、PC内のAIだけで行うツール">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+<script type="module" src="assets/app.js"></script>
+</head>
+<body data-tool="case">
+
+<header class="masthead">
+  <div class="brand">
+    <span class="brand-name">ケース・コーチ</span>
+    <span class="brand-sub">ローカル版</span>
+  </div>
+  <nav class="tools" role="tablist" aria-label="ツールの切り替え">
+    <button role="tab" id="tab-case" aria-controls="tool-case" aria-selected="true" data-tool="case">症例報告・スライド壁打ち</button>
+    <button role="tab" id="tab-reflection" aria-controls="tool-reflection" aria-selected="false" data-tool="reflection">事例振り返り</button>
+  </nav>
+  <div class="mast-actions">
+    <button class="ghost" id="open-help" type="button">準備と使い方</button>
+    <button class="ghost" id="open-settings" type="button">設定</button>
+  </div>
+</header>
+
+<div class="boundary" id="boundary" aria-live="polite">
+  <div class="boundary-diagram" aria-hidden="true">
+    <span class="node">この画面</span>
+    <span class="wire"></span>
+    <span class="node node-ai" id="boundary-ai">AI</span>
+  </div>
+  <p class="boundary-text">
+    <span id="boundary-status" class="dot dot-unknown"></span>
+    <span id="boundary-label">AIにまだ接続していません</span>
+  </p>
+  <p class="boundary-note">入力した文章とファイルは、このPCの外には送られません。</p>
+</div>
+
+<main>
+<!-- ============================ 症例報告・スライド ============================ -->
+<section class="tool" id="tool-case" role="tabpanel" aria-labelledby="tab-case">
+  <form class="intake" id="case-form" autocomplete="off">
+    <h1 class="intake-title">症例報告を見てもらう</h1>
+    <p class="intake-lead">学会の査読者の目線で、採択と伝わる発表に向けて項目ごとに採点し、直し方を示します。</p>
+
+    <fieldset class="seg" id="case-mode">
+      <legend>見てもらうもの</legend>
+      <label><input type="radio" name="mode" value="abstract" checked><span>抄録</span></label>
+      <label><input type="radio" name="mode" value="slides"><span>発表スライド</span></label>
+    </fieldset>
+
+    <div class="row two">
+      <label class="field">
+        <span>学会・セッション<small>任意</small></span>
+        <input type="text" name="society" placeholder="例：日本内科学会 地方会 研修医セッション">
+      </label>
+      <label class="field only-abstract">
+        <span>字数の上限<small>任意</small></span>
+        <input type="number" name="charLimit" min="0" step="50" placeholder="例：800" inputmode="numeric">
+      </label>
+      <label class="field only-slides">
+        <span>持ち時間（分）</span>
+        <input type="number" name="minutes" min="1" max="60" step="1" value="7" inputmode="numeric">
+      </label>
+    </div>
+
+    <div class="drop" data-drop="case">
+      <input type="file" id="case-file" accept=".pptx,.pdf,.docx,.txt,.md" hidden>
+      <button type="button" class="link" data-pick="case-file">ファイルを選ぶ</button>
+      <span>か、ここにドロップ（.pptx / .pdf / .docx / .txt）</span>
+      <p class="drop-status" id="case-file-status"></p>
+    </div>
+
+    <div class="thumbs" id="case-thumbs" hidden>
+      <label class="check"><input type="checkbox" id="case-send-images" checked> <span id="case-thumbs-label">スライド画像も見てもらう</span></label>
+      <div class="thumb-strip" id="case-thumb-strip"></div>
+    </div>
+
+    <label class="field grow">
+      <span>本文<small id="case-count">0字</small></span>
+      <textarea name="text" id="case-text" rows="14" spellcheck="false" placeholder="抄録の本文を貼り付けるか、ファイルを読み込んでください。スライドは「=== スライド 1 ===」の区切りで枚数を数えます。"></textarea>
+    </label>
+
+    <ul class="facts" id="case-facts" aria-label="アプリが数えた値"></ul>
+    <div class="pii" id="case-pii" hidden></div>
+
+    <div class="submit-row">
+      <button type="submit" class="primary" id="case-submit">評価してもらう</button>
+      <span class="submit-note">Ctrl + Enter でも送れます</span>
+    </div>
+  </form>
+
+  <div class="dialogue" id="case-dialogue">
+    <div class="empty" id="case-empty">
+      <h2>査読者の目で、項目ごとに見ます</h2>
+      <p>抄録なら7項目、スライドなら8項目を100点満点で採点し、良い点・足りない点・書き換え例を返します。合計とランクはAIの自己申告ではなく、この画面が計算し直します。</p>
+      <p>評価のあとは、そのまま質問したり、直した版を貼って再評価したりできます。</p>
+      <button type="button" class="secondary needs-setup" data-open="help">AIの準備をする</button>
+    </div>
+    <ol class="log" id="case-log"></ol>
+    <div class="dock" id="case-dock" hidden>
+      <div class="quick" id="case-quick"></div>
+      <form class="composer" id="case-composer">
+        <textarea rows="2" placeholder="追加で聞きたいこと（例：考察の2段落目をどう直せばよい？）" aria-label="追加の質問"></textarea>
+        <button type="submit" class="primary">送る</button>
+        <button type="button" class="stop" hidden>止める</button>
+      </form>
+      <div class="dock-foot">
+        <span class="meter" id="case-meter"></span>
+        <span class="dock-actions">
+          <button type="button" class="link" data-act="export-md">記録を書き出す（.md）</button>
+          <button type="button" class="link" data-act="save-json">作業を保存</button>
+          <button type="button" class="link" data-act="reset">新しく始める</button>
+        </span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 事例振り返り ============================ -->
+<section class="tool" id="tool-reflection" role="tabpanel" aria-labelledby="tab-reflection" hidden>
+  <form class="intake" id="reflection-form" autocomplete="off">
+    <h1 class="intake-title">振り返りを一緒に深める</h1>
+    <p class="intake-lead">指導医のように読んで、良いところを具体的に伝え、考えを深める問いを投げかけます。代わりに書き直すことはしません。</p>
+
+    <div class="row two">
+      <label class="field">
+        <span>研修段階<small>任意</small></span>
+        <select name="stage">
+          <option value="">選ばない</option>
+          <option>専攻医1年目</option>
+          <option>専攻医2年目</option>
+          <option>専攻医3年目</option>
+          <option>初期研修医</option>
+          <option>医学生</option>
+          <option>その他</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>振り返りの種類<small>任意</small></span>
+        <select name="kind">
+          <option value="">選ばない</option>
+          <option>ポートフォリオ（詳細事例報告）</option>
+          <option>日々の短い振り返り</option>
+          <option>重要事象分析（SEA）</option>
+          <option>その他</option>
+        </select>
+      </label>
+    </div>
+
+    <fieldset class="chips" id="reflection-comps">
+      <legend>つなげたい資質・能力<small>任意・複数可</small></legend>
+    </fieldset>
+
+    <div class="drop" data-drop="reflection">
+      <input type="file" id="reflection-file" accept=".docx,.pdf,.txt,.md" hidden>
+      <button type="button" class="link" data-pick="reflection-file">ファイルを選ぶ</button>
+      <span>か、ここにドロップ（.docx / .pdf / .txt）</span>
+      <p class="drop-status" id="reflection-file-status"></p>
+    </div>
+
+    <label class="field grow">
+      <span>振り返りの本文<small id="reflection-count">0字</small></span>
+      <textarea name="text" id="reflection-text" rows="16" placeholder="ポートフォリオの原稿や振り返りを貼り付けてください。患者さんが特定されない書き方にしてから送ると安心です。"></textarea>
+    </label>
+
+    <div class="pii" id="reflection-pii" hidden></div>
+
+    <div class="submit-row">
+      <button type="submit" class="primary" id="reflection-submit">読んでもらう</button>
+      <span class="submit-note">Ctrl + Enter でも送れます</span>
+    </div>
+  </form>
+
+  <div class="dialogue" id="reflection-dialogue">
+    <div class="empty" id="reflection-empty">
+      <h2>問いかけで、内省を一段深く</h2>
+      <p>最初に良い点と、振り返りがどこまで深まっているか（記述・感情・評価・分析・結論・行動計画）を示し、考えを深める問いを3つ出します。</p>
+      <p>そのあとは問いに1つずつ答えていくだけです。最後に「ここまでをまとめる」で学びと学習計画を整理できます。</p>
+      <button type="button" class="secondary needs-setup" data-open="help">AIの準備をする</button>
+    </div>
+    <ol class="log" id="reflection-log"></ol>
+    <div class="dock" id="reflection-dock" hidden>
+      <div class="quick" id="reflection-quick"></div>
+      <form class="composer" id="reflection-composer">
+        <textarea rows="2" placeholder="問いへの答えや、考えたことをそのまま書いてください" aria-label="返答"></textarea>
+        <button type="submit" class="primary">送る</button>
+        <button type="button" class="stop" hidden>止める</button>
+      </form>
+      <div class="dock-foot">
+        <span class="meter" id="reflection-meter"></span>
+        <span class="dock-actions">
+          <button type="button" class="link" data-act="export-md">記録を書き出す（.md）</button>
+          <button type="button" class="link" data-act="save-json">作業を保存</button>
+          <button type="button" class="link" data-act="reset">新しく始める</button>
+        </span>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <p>AIの評価は練習用の目安です。学会の正式な査読や、指導医による評価・臨床判断に代わるものではありません。</p>
+  <p>
+    <button type="button" class="link" id="open-session">保存した作業を開く</button>
+    <input type="file" id="session-file" accept=".json,application/json" hidden>
+  </p>
+</footer>
+
+<!-- ============================ 設定 ============================ -->
+<dialog id="settings" aria-labelledby="settings-title">
+  <form method="dialog" class="dlg">
+    <header class="dlg-head">
+      <h2 id="settings-title">設定</h2>
+      <button class="ghost" value="close" aria-label="閉じる">閉じる</button>
+    </header>
+    <nav class="dlg-tabs" role="tablist">
+      <button type="button" role="tab" aria-selected="true" data-pane="pane-conn">接続</button>
+      <button type="button" role="tab" aria-selected="false" data-pane="pane-prompt">プロンプト</button>
+      <button type="button" role="tab" aria-selected="false" data-pane="pane-data">保存データ</button>
+    </nav>
+
+    <section class="pane" id="pane-conn">
+      <fieldset class="seg">
+        <legend>AIの実行環境</legend>
+        <label><input type="radio" name="engine" value="ollama" checked><span>Ollama</span></label>
+        <label><input type="radio" name="engine" value="openai"><span>LM Studio など（OpenAI互換）</span></label>
+      </fieldset>
+      <div class="row conn">
+        <label class="field grow">
+          <span>アドレス</span>
+          <input type="url" id="set-base" spellcheck="false" placeholder="http://localhost:11434">
+        </label>
+        <button type="button" class="secondary" id="set-test">接続を確かめる</button>
+      </div>
+      <div class="conn-result" id="set-result" aria-live="polite"></div>
+
+      <label class="field">
+        <span>使うモデル</span>
+        <select id="set-model"><option value="">（接続すると一覧が出ます）</option></select>
+      </label>
+      <p class="hint" id="set-model-info"></p>
+
+      <div class="row two">
+        <label class="field">
+          <span>応答の幅（temperature）<small id="set-temp-val">0.3</small></span>
+          <input type="range" id="set-temp" min="0" max="1" step="0.1" value="0.3">
+        </label>
+        <label class="field only-ollama">
+          <span>一度に読める長さ</span>
+          <select id="set-ctx">
+            <option value="8192">8,192 トークン（軽い）</option>
+            <option value="16384" selected>16,384 トークン（標準）</option>
+            <option value="32768">32,768 トークン（長いスライド向け）</option>
+            <option value="65536">65,536 トークン（メモリに余裕がある場合）</option>
+          </select>
+        </label>
+      </div>
+      <div class="row two">
+        <label class="field only-ollama">
+          <span>考える過程（推論）</span>
+          <select id="set-think">
+            <option value="auto">モデルに任せる</option>
+            <option value="off">使わない（速さ優先）</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>PDFを画像にする上限</span>
+          <select id="set-maximg">
+            <option value="0">画像にしない</option>
+            <option value="6">6ページ</option>
+            <option value="12" selected>12ページ</option>
+            <option value="20">20ページ</option>
+          </select>
+        </label>
+      </div>
+      <label class="check only-openai"><input type="checkbox" id="set-vision"> このモデルは画像を読める（LM Studio では自動判定できないため手動で指定）</label>
+      <p class="hint only-openai">「一度に読める長さ」は LM Studio 側のモデル読み込み設定（Context Length）で変えてください。</p>
+    </section>
+
+    <section class="pane" id="pane-prompt" hidden>
+      <p class="hint">Gem の「カスタム指示」と「知識」に当たります。ここでの変更は、このブラウザにだけ保存されます。全員の既定値を変えるには assets/prompts.js を編集してください。</p>
+      <fieldset class="seg">
+        <legend>対象</legend>
+        <label><input type="radio" name="ptool" value="case" checked><span>症例報告・スライド</span></label>
+        <label><input type="radio" name="ptool" value="reflection"><span>事例振り返り</span></label>
+      </fieldset>
+      <label class="field">
+        <span>指示文<small>{RUBRIC} などの記号は送信時に置き換わります</small></span>
+        <textarea id="set-system" rows="12" spellcheck="false" class="mono"></textarea>
+      </label>
+      <label class="field">
+        <span>参考資料（ナレッジ）<small id="set-know-count">0字</small></span>
+        <textarea id="set-knowledge" rows="6" placeholder="評価の物差しにしたい資料（ルーブリック、学会の投稿規定、作成した調査レポートなど）を貼り付けるか、ファイルから読み込みます。"></textarea>
+      </label>
+      <div class="row">
+        <input type="file" id="set-know-file" accept=".md,.txt,.pdf,.docx" hidden>
+        <button type="button" class="secondary" data-pick="set-know-file">ファイルから読み込む</button>
+        <span class="spacer"></span>
+        <button type="button" class="ghost" id="set-prompt-reset">既定に戻す</button>
+        <button type="button" class="primary" id="set-prompt-save">保存する</button>
+      </div>
+      <p class="hint" id="set-prompt-status" aria-live="polite"></p>
+    </section>
+
+    <section class="pane" id="pane-data" hidden>
+      <h3>このブラウザに保存しているもの</h3>
+      <ul class="plain">
+        <li>接続先・モデルなどの設定</li>
+        <li>「プロンプト」で編集した指示文と参考資料（編集した場合のみ）</li>
+      </ul>
+      <h3>保存していないもの</h3>
+      <ul class="plain">
+        <li>入力した本文、読み込んだファイル、AIとの対話。ページを閉じると消えます。残したいときは「記録を書き出す」か「作業を保存」でファイルにしてください。</li>
+      </ul>
+      <button type="button" class="secondary danger" id="set-clear">保存した設定をすべて消す</button>
+      <p class="hint" id="set-clear-status" aria-live="polite"></p>
+    </section>
+  </form>
+</dialog>
+
+<!-- ============================ 準備と使い方 ============================ -->
+<dialog id="help" aria-labelledby="help-title">
+  <form method="dialog" class="dlg">
+    <header class="dlg-head">
+      <h2 id="help-title">準備と使い方</h2>
+      <button class="ghost" value="close" aria-label="閉じる">閉じる</button>
+    </header>
+    <div class="help">
+      <p>このツールは、あなたのPCで動くAI（ローカルLLM）に直接つながります。準備は最初の1回だけです。</p>
+      <nav class="dlg-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected="true" data-pane="help-win">Windows</button>
+        <button type="button" role="tab" aria-selected="false" data-pane="help-mac">Mac</button>
+        <button type="button" role="tab" aria-selected="false" data-pane="help-lms">LM Studio を使う</button>
+      </nav>
+
+      <section class="pane" id="help-win">
+        <ol class="steps">
+          <li><strong>Ollama を入れる。</strong> ollama.com から Windows 版をダウンロードしてインストールします。</li>
+          <li><strong>モデルを取得する。</strong> PowerShell を開いて実行します（数GBのダウンロード）。
+            <div class="cmd"><code>ollama pull gemma3:12b</code><button type="button" class="copy">コピー</button></div>
+            <p class="hint">メモリ16GB程度なら <code>gemma3:12b</code>、8GB程度なら <code>gemma3:4b</code> が目安です。日本語が得意な新しいモデルが出ていれば、それでも動きます。</p>
+          </li>
+          <li><strong>この画面からの接続を許可する。</strong> PowerShell で次を実行します。
+            <div class="cmd"><code data-origin-cmd="win"></code><button type="button" class="copy">コピー</button></div>
+            <p class="hint">そのあと、タスクバー右下の Ollama アイコンを右クリックして「Quit Ollama」で終了し、もう一度起動してください。ほかの用途で OLLAMA_ORIGINS をすでに設定している場合は、上書きせずカンマ区切りで追記します。</p>
+          </li>
+          <li><strong>ブラウザの許可。</strong> Chrome や Edge で「ローカルネットワーク上のデバイスへのアクセス」の許可を求められたら「許可」を選びます。</li>
+          <li><strong>つなぐ。</strong> 右上の「設定」→「接続を確かめる」を押し、モデルを選びます。</li>
+        </ol>
+      </section>
+
+      <section class="pane" id="help-mac" hidden>
+        <ol class="steps">
+          <li><strong>Ollama を入れる。</strong> ollama.com から Mac 版をインストールします。</li>
+          <li><strong>モデルを取得する。</strong> ターミナルで実行します。
+            <div class="cmd"><code>ollama pull gemma3:12b</code><button type="button" class="copy">コピー</button></div>
+          </li>
+          <li><strong>この画面からの接続を許可する。</strong>
+            <div class="cmd"><code data-origin-cmd="mac"></code><button type="button" class="copy">コピー</button></div>
+            <p class="hint">メニューバーの Ollama を終了して、もう一度起動します（Macを再起動したら再実行が必要です）。</p>
+          </li>
+          <li><strong>つなぐ。</strong> 「設定」→「接続を確かめる」。</li>
+        </ol>
+      </section>
+
+      <section class="pane" id="help-lms" hidden>
+        <ol class="steps">
+          <li><strong>LM Studio を入れて、モデルをダウンロードする。</strong> 画面上の検索から日本語に強いモデルを選びます。</li>
+          <li><strong>サーバーを起動する。</strong> Developer（開発者）画面でサーバーを Start し、設定の <em>Enable CORS</em> をオンにします。</li>
+          <li><strong>つなぐ。</strong> この画面の「設定」で「LM Studio など」を選び、アドレスを <code>http://localhost:1234</code> にして「接続を確かめる」。</li>
+        </ol>
+      </section>
+
+      <h3>入力したものはどこに行く？</h3>
+      <ul class="plain">
+        <li>本文・ファイルの読み取り、個人情報らしき語のチェック、文字数の計測は、すべてこのブラウザの中で行います。</li>
+        <li>AIへの送信先は、このPCの中の AI サーバー（<code>localhost</code>）だけです。それ以外への通信は、ページの通信制限（CSP）でブラウザが止めます。</li>
+        <li>本文や対話はこのブラウザにも保存しません。ページを閉じると消えます。</li>
+      </ul>
+
+      <h3>うまく動かないとき</h3>
+      <ul class="plain">
+        <li><strong>接続できない：</strong> Ollama が起動しているか、手順3の許可設定のあと Ollama を再起動したかを確認してください。ブラウザのアドレスバー左のアイコン →「サイトの設定」で、ローカルネットワークへのアクセスが「許可」になっているかも確認します。</li>
+        <li><strong>途中で話が噛み合わなくなる：</strong> 文章が長いと、AIが古いやりとりを忘れます。「設定」で「一度に読める長さ」を増やすか、「新しく始める」でやり直してください。</li>
+        <li><strong>点数の表が出ない：</strong> 小さなモデルは決まった書式を守れないことがあります。「再生成」を押すか、大きめのモデルに替えてください。</li>
+      </ul>
+    </div>
+  </form>
+</dialog>
+
+<template id="tpl-error">
+  <li class="msg msg-error">
+    <h3 class="err-title"></h3>
+    <p class="err-body"></p>
+    <ol class="err-steps"></ol>
+    <p><button type="button" class="secondary" data-open="settings">設定を開く</button> <button type="button" class="ghost" data-open="help">準備の手順を見る</button></p>
+  </li>
+</template>
+
+</body>
+</html>
