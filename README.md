@@ -150,4 +150,4 @@ vendor/pdfjs/       pdf.js 3.2.146（Mozilla, Apache-2.0）と日本語用 CMap
 ## ライセンス
 
 - `vendor/pdfjs/`：Apache License 2.0（© Mozilla Foundation）。`vendor/pdfjs/LICENSE` を同梱。
-- それ以外：リポジトリの所有者が決めてください（公開するなら MIT などを `LICENSE` として追加）。
+- それ以外：MIT License（`LICENSE` を参照）。
