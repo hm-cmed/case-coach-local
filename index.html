@@ -43,6 +43,7 @@
   <p class="boundary-text">
     <span id="boundary-status" class="dot dot-unknown"></span>
     <span id="boundary-label">AIにまだ接続していません</span>
+    <button type="button" class="link" id="boundary-fix" data-open="diagnose" hidden>原因を調べる</button>
   </p>
   <p class="boundary-note">入力した文章とファイルは、このPCの外には送られません。</p>
 </div>
@@ -243,8 +244,9 @@
           <span>アドレス</span>
           <input type="url" id="set-base" spellcheck="false" placeholder="http://localhost:11434">
         </label>
-        <button type="button" class="secondary" id="set-test">接続を確かめる</button>
+        <button type="button" class="primary" id="set-test">接続を確かめる</button>
       </div>
+      <p class="hint" id="set-base-hint"></p>
       <div class="conn-result" id="set-result" aria-live="polite"></div>
 
       <label class="field">
@@ -353,13 +355,17 @@
             <div class="cmd"><code>ollama pull gemma3:12b</code><button type="button" class="copy">コピー</button></div>
             <p class="hint">メモリ16GB程度なら <code>gemma3:12b</code>、8GB程度なら <code>gemma3:4b</code> が目安です。日本語が得意な新しいモデルが出ていれば、それでも動きます。</p>
           </li>
-          <li><strong>この画面からの接続を許可する。</strong> PowerShell で次を実行します。
+          <li><strong>この画面からの接続を許可する。</strong> Ollama は最初、ブラウザで開いたサイトからの接続を断る設定になっています。PowerShell に次を貼り付けて Enter を押します（何も表示されなければ成功です）。
             <div class="cmd"><code data-origin-cmd="win"></code><button type="button" class="copy">コピー</button></div>
-            <p class="hint">そのあと、タスクバー右下の Ollama アイコンを右クリックして「Quit Ollama」で終了し、もう一度起動してください。ほかの用途で OLLAMA_ORIGINS をすでに設定している場合は、上書きせずカンマ区切りで追記します。</p>
+            <p class="hint"><strong>このあと Ollama の再起動が必須です。</strong>タスクバー右下（「^」の中）の Ollama アイコンを右クリック →「Quit Ollama」で終了し、<strong>スタートメニューから</strong> Ollama を起動し直してください。開いたままの PowerShell から起動すると設定が反映されないことがあります。</p>
+            <p class="hint">確かめ方：PowerShell で次を実行し、<code>200</code> と出れば許可済み、<code>403</code> なら未設定か再起動前です。</p>
+            <div class="cmd"><code data-origin-cmd="wincheck"></code><button type="button" class="copy">コピー</button></div>
+            <p class="hint">ほかの用途で OLLAMA_ORIGINS をすでに設定している場合は、上書きせずカンマ区切りで追記します。</p>
           </li>
           <li><strong>ブラウザの許可。</strong> Chrome や Edge で「ローカルネットワーク上のデバイスへのアクセス」の許可を求められたら「許可」を選びます。</li>
-          <li><strong>つなぐ。</strong> 右上の「設定」→「接続を確かめる」を押し、モデルを選びます。</li>
+          <li><strong>つなぐ。</strong> 右上の「設定」→「接続を確かめる」を押し、モデルを選びます。うまくいかないときは、どの段階で止まっているかと直し方がその場に表示されます。</li>
         </ol>
+        <p class="hint">アドレスの <code>11434</code> は Ollama の標準の番号です。Ollama の設定（OLLAMA_HOST）で番号を変えていない限り、変更する必要はありません。</p>
       </section>
 
       <section class="pane" id="help-mac" hidden>
@@ -406,7 +412,7 @@
     <h3 class="err-title"></h3>
     <p class="err-body"></p>
     <ol class="err-steps"></ol>
-    <p><button type="button" class="secondary" data-open="settings">設定を開く</button> <button type="button" class="ghost" data-open="help">準備の手順を見る</button></p>
+    <p><button type="button" class="secondary" data-open="diagnose">原因を調べる</button> <button type="button" class="ghost" data-open="help">準備の手順を見る</button></p>
   </li>
 </template>
 

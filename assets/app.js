@@ -2,7 +2,7 @@
 // app.js — 画面の動き
 // 入力・対話はメモリ上だけに置き、ブラウザにも保存しない（設定とプロンプト編集のみ保存）。
 // =====================================================================
-import { ENGINES, engine, normalizeBase, isLocalBase, ConnectionError, splitThink } from './engines.js';
+import { ENGINES, engine, normalizeBase, isLocalBase, ConnectionError, splitThink, probe, localNetworkPermission } from './engines.js';
 import { extractFile, caseMetrics, countChars, estimateTokens } from './extract.js';
 import { scanPersonalInfo, maskPersonalInfo } from './privacy.js';
 import { renderMarkdown } from './markdown.js';
@@ -168,6 +168,7 @@ function updateBoundary() {
     label.textContent = 'AIにまだ接続していません';
   }
   document.body.classList.toggle('connected', conn.status === 'ok' && !!settings.model);
+  $('#boundary-fix').hidden = conn.status !== 'error';
 }
 
 function pickDefaultModel(models) {
@@ -229,6 +230,7 @@ function connectionHelp(err) {
         ? `この画面からの接続を許可したか確認してください（「準備と使い方」の手順3）。許可したあとは Ollama の再起動が必要です。許可するアドレスは ${location.origin} です。`
         : 'LM Studio の設定で「Enable CORS」がオンになっているか確認してください。',
       'ブラウザのアドレスバー左のアイコン →「サイトの設定」で、ローカルネットワークへのアクセスが「許可」になっているか確認してください。',
+      '「原因を調べる」を押すと、どこで止まっているかを順に確かめて直し方を示します。',
     ],
   };
 }
@@ -917,28 +919,191 @@ function showConnResult(kind, content) {
   box.replaceChildren(...[content].flat());
 }
 
-async function testConnection() {
-  settings.engine = $('input[name=engine]:checked', dlgSettings).value;
-  settings.base = normalizeBase($('#set-base').value || ENGINES[settings.engine].defaultBase);
-  $('#set-base').value = settings.base;
-  saveSettings();
-  showConnResult('', '確かめています…');
-  try {
-    const models = await connect();
-    fillModelSelect();
-    showModelInfo();
-    if (!models.length) {
-      showConnResult('err', [el('strong', { text: '接続できましたが、モデルがありません。' }), el('p', { text: settings.engine === 'ollama' ? 'PowerShell で「ollama pull gemma3:12b」などを実行してモデルを取得してください。' : 'LM Studio でモデルを読み込んでください。' })]);
-    } else {
-      showConnResult('ok', [el('strong', { text: `接続できました（モデル${models.length}件）。` }), ' 使うモデルを選んでください。'] );
-    }
-  } catch (e) {
-    const h = connectionHelp(e);
-    showConnResult('err', [el('strong', { text: h.title }), el('p', { text: h.body }), el('ol', {}, h.steps.map(t => el('li', { text: t })))]);
-    fillModelSelect();
+// ---------------------------------------------------------------------
+// 接続の診断：どの段階で止まっているかを順に確かめ、その場で直し方を示す
+// ---------------------------------------------------------------------
+const OS = /Windows/i.test(navigator.userAgent) ? 'win' : /Mac/i.test(navigator.userAgent) ? 'mac' : 'other';
+
+function cmdBox(text) {
+  const btn = el('button', { type: 'button', class: 'copy', text: 'コピー' });
+  btn.addEventListener('click', () => copyText(text, btn));
+  return el('div', { class: 'cmd' }, el('code', { text }), btn);
+}
+
+function originsCommand() {
+  return OS === 'mac'
+    ? `launchctl setenv OLLAMA_ORIGINS "${location.origin}"`
+    : `[Environment]::SetEnvironmentVariable("OLLAMA_ORIGINS", "${location.origin}", "User")`;
+}
+
+function originsCheckCommand(base) {
+  return `curl.exe -s -o NUL -w "%{http_code}" -H "Origin: ${location.origin}" ${base}/api/tags`;
+}
+
+function fixNotAllowed(base) {
+  if (settings.engine !== 'ollama') {
+    return [
+      el('p', { text: 'LM Studio などのサーバーは動いていますが、ブラウザからの接続を受け付けていません。' }),
+      el('ol', {},
+        el('li', { text: 'LM Studio の Developer（開発者）画面で、Server Settings の「Enable CORS」をオンにする。' }),
+        el('li', { text: 'サーバーを Stop → Start で起動し直す。' }),
+        el('li', { text: 'この画面で「もう一度確かめる」を押す。' }),
+      ),
+    ];
   }
-  renderLog('case');
-  renderLog('reflection');
+  const steps = [
+    el('li', {}, OS === 'mac' ? 'ターミナルに次を貼り付けて Enter を押す。' : 'PowerShell に次を貼り付けて Enter を押す（何も表示されなければ成功）。', cmdBox(originsCommand())),
+    el('li', { text: OS === 'mac'
+      ? 'メニューバーの Ollama アイコン →「Quit Ollama」で終了し、アプリケーションから Ollama を起動し直す。'
+      : 'タスクバー右下（「^」の中）の Ollama アイコンを右クリック →「Quit Ollama」で終了し、スタートメニューから Ollama を起動し直す。' }),
+    el('li', { text: 'この画面で「もう一度確かめる」を押す。' }),
+  ];
+  const parts = [
+    el('p', {}, 'Ollama は動いていますが、このサイト（', el('code', { text: location.origin }), '）からの接続を許可していません。Ollama は最初、ブラウザで開いたサイトからの接続を断る設定になっているためです。次の3つで直ります。'),
+    el('ol', {}, steps),
+  ];
+  if (OS === 'win') {
+    parts.push(el('details', { class: 'diag-more' },
+      el('summary', { text: 'それでも直らないとき' }),
+      el('p', { text: '設定が Ollama に届いているかは、PowerShell で次を実行して確かめられます。200 なら許可済み、403 なら未設定か Ollama の再起動前です。' }),
+      cmdBox(originsCheckCommand(base)),
+      el('p', { text: '403 のままなら、Ollama が完全に終わっていない可能性があります。PCを再起動してから、もう一度確かめてください。' }),
+    ));
+  }
+  return parts;
+}
+
+function fixNotRunning(base) {
+  const isOllama = settings.engine === 'ollama';
+  const port = (() => { try { return new URL(base).port; } catch { return ''; } })();
+  return [
+    el('p', { text: `${base} に応答がありません。` }),
+    el('ol', {},
+      el('li', { text: isOllama
+        ? (OS === 'win' ? 'Ollama が起動しているか確かめる。タスクバー右下（「^」の中）に Ollama のアイコンがなければ、スタートメニューから Ollama を起動する。' : 'Ollama が起動しているか確かめる（メニューバーのアイコン）。')
+        : 'LM Studio などでサーバーが起動しているか確かめる（Developer 画面で Start）。' }),
+      el('li', { text: isOllama
+        ? `アドレスは http://localhost:11434 のままにする（11434 は Ollama の標準の番号）。${port && port !== '11434' ? `いまは ${port} 番になっています。Ollama の設定（OLLAMA_HOST）で番号を変えていなければ 11434 に戻してください。` : ''}`
+        : 'アドレスの番号を、LM Studio の画面に表示されているサーバーの番号（標準は 1234）に合わせる。' }),
+      el('li', { text: 'Ollama などは確かに動いているのにここで止まる場合は、ブラウザが接続を止めています。アドレスバー左のアイコン →「サイトの設定」で「ローカル ネットワーク アクセス」（または「ローカル ネットワーク上のデバイス」）を「許可」にし、ページを再読み込みしてください。' }),
+    ),
+  ];
+}
+
+function fixBrowserBlocked() {
+  return [
+    el('p', { text: 'ブラウザが、このサイトからPC内のAIへの接続を止めています（以前に「ブロック」を選んだ場合など）。' }),
+    el('ol', {},
+      el('li', { text: 'アドレスバー左のアイコン（鍵や設定のマーク）をクリック →「サイトの設定」を開く。' }),
+      el('li', { text: '「ローカル ネットワーク アクセス」（または「ローカル ネットワーク上のデバイス」）を「許可」にする。' }),
+      el('li', { text: 'このページを再読み込みして、もう一度「接続を確かめる」を押す。' }),
+    ),
+  ];
+}
+
+function renderDiagnosis(steps, fix, okMessage) {
+  const mark = { ok: '✓', ng: '✕', wait: '…', skip: '－' };
+  const list = el('ol', { class: 'diag' }, steps.map(st =>
+    el('li', { class: `diag-${st.state}` },
+      el('span', { class: 'diag-mark', 'aria-hidden': 'true', text: mark[st.state] }),
+      el('span', {}, st.label, st.note ? el('small', { text: `　${st.note}` }) : null),
+    )));
+  const parts = [list];
+  if (fix) parts.push(el('div', { class: 'diag-fix' }, fix, el('p', {}, el('button', { type: 'button', class: 'primary', text: 'もう一度確かめる', onclick: diagnose }))));
+  if (okMessage) parts.push(el('p', { class: 'diag-ok', text: okMessage }));
+  const anyNg = steps.some(s => s.state === 'ng');
+  showConnResult(anyNg ? 'err' : steps.every(s => s.state === 'ok') ? 'ok' : '', parts);
+}
+
+let diagnosing = false;
+async function diagnose() {
+  if (diagnosing) return;
+  diagnosing = true;
+  try {
+    const d = dlgSettings;
+    settings.engine = $('input[name=engine]:checked', d).value;
+    settings.base = normalizeBase($('#set-base').value || ENGINES[settings.engine].defaultBase);
+    $('#set-base').value = settings.base;
+    saveSettings();
+    const base = settings.base;
+    const name = settings.engine === 'ollama' ? 'Ollama' : 'LM Studio など';
+    const steps = [
+      { label: `${name} がこのPCで動いている`, state: 'wait' },
+      { label: `このサイトからの接続を ${name} が許可している`, state: 'wait' },
+      { label: '使えるモデルが入っている', state: 'wait' },
+    ];
+    renderDiagnosis(steps);
+
+    if (!isLocalBase(base)) {
+      steps.forEach(s => { s.state = 'skip'; });
+      steps[0].state = 'ng';
+      renderDiagnosis(steps, [el('p', { text: 'このページは、このPCの中（localhost / 127.0.0.1）のAIにだけ接続できます。' }),
+        el('p', { text: `アドレスを ${ENGINES[settings.engine].defaultBase} にしてください。` })]);
+      return;
+    }
+
+    let models = null, err = null;
+    try { models = await connect(); } catch (e) { err = e; }
+
+    if (models) {
+      steps[0].state = 'ok';
+      steps[1].state = 'ok';
+      fillModelSelect();
+      showModelInfo();
+      if (!models.length) {
+        steps[2].state = 'ng';
+        renderDiagnosis(steps, [el('p', { text: 'モデルがまだ入っていません。' }),
+          settings.engine === 'ollama' ? cmdBox('ollama pull gemma3:12b') : el('p', { text: 'LM Studio でモデルをダウンロードして読み込んでください。' })]);
+      } else {
+        steps[2].state = 'ok';
+        steps[2].note = `${models.length}件`;
+        renderDiagnosis(steps, null, `接続できました。下の「使うモデル」を確かめて、設定を閉じてください。`);
+      }
+      return;
+    }
+
+    if (err?.kind === 'notfound' || err?.kind === 'http') {
+      steps[0].state = 'ok';
+      steps[1].state = 'ok';
+      steps[2].state = 'ng';
+      const h = connectionHelp(err);
+      renderDiagnosis(steps, [el('p', { text: h.body }), el('ol', {}, h.steps.map(t => el('li', { text: t })))]);
+      return;
+    }
+
+    const reachable = await probe(base);
+    if (reachable) {
+      steps[0].state = 'ok';
+      steps[1].state = 'ng';
+      steps[2].state = 'skip';
+      renderDiagnosis(steps, fixNotAllowed(base));
+      return;
+    }
+    const perm = await localNetworkPermission();
+    steps[1].state = 'skip';
+    steps[2].state = 'skip';
+    if (perm === 'denied') {
+      steps[0].state = 'skip';
+      steps[0].note = 'ブラウザが接続を止めているため確認できません';
+      renderDiagnosis(steps, fixBrowserBlocked());
+    } else {
+      steps[0].state = 'ng';
+      renderDiagnosis(steps, fixNotRunning(base));
+    }
+  } finally {
+    diagnosing = false;
+    fillModelSelect();
+    renderLog('case');
+    renderLog('reflection');
+  }
+}
+
+function updateBaseHint() {
+  const hint = $('#set-base-hint');
+  if (!hint) return;
+  hint.textContent = settings.engine === 'ollama'
+    ? 'Ollama は通常このまま（http://localhost:11434）で大丈夫です。11434 は Ollama の標準の番号で、Ollama の設定（OLLAMA_HOST）で変えていない限り変更不要です。'
+    : 'LM Studio の標準は http://localhost:1234 です。LM Studio の Developer 画面に表示される番号に合わせてください。';
 }
 
 function openSettings(message) {
@@ -954,6 +1119,7 @@ function openSettings(message) {
   $('#set-vision').checked = !!settings.openaiVision;
   fillModelSelect();
   showModelInfo();
+  updateBaseHint();
   if (message) showConnResult('err', el('strong', { text: message }));
   else if (conn.status === 'ok') showConnResult('ok', `接続中：${settings.model || 'モデル未選択'}`);
   else $('#set-result').replaceChildren();
@@ -976,11 +1142,13 @@ function wireSettings() {
       saveSettings();
       fillModelSelect();
       showModelInfo();
+      updateBaseHint();
+      $('#set-result').replaceChildren();
       updateBoundary();
     });
   }
-  $('#set-test').addEventListener('click', testConnection);
-  $('#set-base').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); testConnection(); } });
+  $('#set-test').addEventListener('click', diagnose);
+  $('#set-base').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); diagnose(); } });
   $('#set-model').addEventListener('change', async e => {
     settings.model = e.target.value;
     saveSettings();
@@ -1060,6 +1228,7 @@ function wireHelp() {
   const origin = location.origin;
   $('[data-origin-cmd=win]', d).textContent = `[Environment]::SetEnvironmentVariable("OLLAMA_ORIGINS", "${origin}", "User")`;
   $('[data-origin-cmd=mac]', d).textContent = `launchctl setenv OLLAMA_ORIGINS "${origin}"`;
+  $('[data-origin-cmd=wincheck]', d).textContent = `curl.exe -s -o NUL -w "%{http_code}" -H "Origin: ${origin}" http://localhost:11434/api/tags`;
   for (const b of $$('.copy', d)) b.addEventListener('click', () => copyText($('code', b.parentElement).textContent, b));
 }
 
@@ -1102,6 +1271,7 @@ function init() {
     if (open) {
       e.preventDefault();
       if (open.dataset.open === 'settings') openSettings();
+      if (open.dataset.open === 'diagnose') { openSettings(); diagnose(); }
       if (open.dataset.open === 'help') { const h = $('#help'); if (!h.open) h.showModal(); }
     }
     const pick = e.target.closest('[data-pick]');

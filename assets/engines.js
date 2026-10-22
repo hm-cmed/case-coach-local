@@ -201,6 +201,36 @@ const openai = {
 
 const IMPL = { ollama, openai };
 
+/**
+ * 接続診断用：AIサーバーが「動いているか」だけを確かめる。
+ * no-cors の要求は、相手がこのサイトを許可していなくても（中身は読めないまま）成功するので、
+ * 「動いているが許可されていない」と「動いていない／ブラウザが止めている」を見分けられる。
+ */
+export async function probe(base, timeoutMs = 20000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    await fetch(`${base}/`, { mode: 'no-cors', cache: 'no-store', signal: ctl.signal });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** ブラウザの「ローカルネットワークへのアクセス」許可の状態（取れないブラウザでは null） */
+export async function localNetworkPermission() {
+  if (!navigator.permissions?.query) return null;
+  for (const name of ['local-network-access', 'loopback-network', 'local-network']) {
+    try {
+      const st = await navigator.permissions.query({ name });
+      return st.state; // 'granted' | 'denied' | 'prompt'
+    } catch { /* このブラウザでは未対応の名前 */ }
+  }
+  return null;
+}
+
 export function engine(id) { return IMPL[id] || ollama; }
 
 /**

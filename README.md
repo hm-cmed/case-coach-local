@@ -68,10 +68,13 @@ python -m http.server 8000
    ```powershell
    [Environment]::SetEnvironmentVariable("OLLAMA_ORIGINS", "https://hm-cmed.github.io", "User")
    ```
-   タスクバー右下の Ollama アイコンを右クリック →「Quit Ollama」→ もう一度起動。
+   タスクバー右下（「^」の中）の Ollama アイコンを右クリック →「Quit Ollama」→ **スタートメニューから**起動し直す（この再起動をしないと設定が効きません）。
    すでに `OLLAMA_ORIGINS` を使っている場合は、上書きせずカンマ区切りで追記してください。
+   確かめ方：`curl.exe -s -o NUL -w "%{http_code}" -H "Origin: https://hm-cmed.github.io" http://localhost:11434/api/tags` が `200` なら許可済み、`403` なら未設定か再起動前。
 4. **ブラウザの許可** — Chrome / Edge で「ローカルネットワーク上のデバイスへのアクセス」の許可を求められたら「許可」。
-5. **つなぐ** — アプリ右上の「設定」→「接続を確かめる」→ モデルを選ぶ。
+5. **つなぐ** — アプリ右上の「設定」→「接続を確かめる」→ モデルを選ぶ。つながらないときは「Ollama が動いている／このサイトを許可している／モデルがある」の3段階で、どこで止まっているかと直し方が表示されます。
+
+アドレスの `11434` は Ollama の標準の番号です。Ollama の設定（`OLLAMA_HOST`）で変えていない限り、変更は不要です。
 
 Mac は手順3を `launchctl setenv OLLAMA_ORIGINS "https://hm-cmed.github.io"` に置き換えます（再起動のたびに必要）。
 
